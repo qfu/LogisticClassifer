@@ -1,8 +1,12 @@
 
 import sys
 from pyspark import SparkConf,SparkContext
+from nltk.tokenize import RegexpTokenizer
+from itertools import chain
 
-minFrequency = 6;
+
+minFrequency = 0;
+tokenizer = RegexpTokenizer(r'\w+')
 
 
 class Utility:
@@ -76,27 +80,35 @@ class Utility:
 
         return mergeDict
 
+
+
+
 # Driver Program
-def main():
+def frequentMine(Filepath, iteration = 8, minimumSupport = 6, tweets=False):
 
-
+    minFrequency = minimumSupport;
     #Setting up the standalone mode
     conf = SparkConf().setMaster("local").setAppName("LogisticClassifer")
     sc = SparkContext(conf = conf)
 
     # Load in RDD and RDD persist for multiple operation
-    lines = sc.textFile("./random.txt");
+    lines = sc.textFile(Filepath)
+
+    if tweets:
+        lines = lines.flatMap(lambda x : x.split('\n')).map(lambda line : tokenizer.tokenize(line)).map(lambda x : " ".join(x) + ".");
+
 
     #Serires of operations										# Get rid of len 0 line 			#get zipWithIndex
     idxSentence = lines.flatMap(lambda line : line.split(".")).filter(lambda line : len(line) > 0 ).zipWithIndex().persist()
 
+    #Set up datastructure
     phasefrequency = {}
     frequecy = {}
     result = {}
 
     # Main Logic of Phase Mining
     # i is the i-grams, default to 8
-    for i in range(1,8):
+    for i in range(1,iteration):
         #First Map reduce job get the all N-gram that satisfy minimum support
         #And put them with corresponding index
         #Map should take one argument (x,y)
@@ -117,25 +129,25 @@ def main():
         if frequencyDict.isEmpty():
             break
         MergeFrequency = frequencyDict.reduce(lambda x,y : Utility.mergeFrequency(x,y))
-        #print "The merged frequency are"
-        #print MergeFrequency
+
+        #Getting the result out
         result.update(MergeFrequency)
         frequecy = MergeFrequency
         phasefrequency = findDict
 
-
-    print "final frequency is"
+    #Last process
     lastRun = []
     for k,v in result.iteritems():
         if(v < minFrequency):
             lastRun.append(k)
-
     [result.pop(key) for key in lastRun]
+
     print result
 
 
-    # Next Step is Phase Construction Algorithm
 
+def main():
+    frequentMine(Filepath ="./tweets_smaller.txt", iteration = 8, minimumSupport = 6, tweets =True)
 
 
 if __name__ == "__main__": main()
