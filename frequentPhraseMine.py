@@ -4,10 +4,11 @@ from pyspark import SparkConf,SparkContext
 from nltk.tokenize import RegexpTokenizer
 from itertools import chain
 
+from nltk.tokenize import word_tokenize
 
 minFrequency = 0;
-tokenizer = RegexpTokenizer(r'\w+')
-
+#tokenizer = RegexpTokenizer(r'\w+')
+tokenizer = RegexpTokenizer('[a-zA-Z]\w+')
 
 class Utility:
     @staticmethod
@@ -83,6 +84,9 @@ class Utility:
 
 
 
+
+
+
 # Driver Program
 def frequentMine(Filepath, iteration = 8, minimumSupport = 6, tweets=False):
 
@@ -95,7 +99,7 @@ def frequentMine(Filepath, iteration = 8, minimumSupport = 6, tweets=False):
     lines = sc.textFile(Filepath)
 
     if tweets:
-        lines = lines.flatMap(lambda x : x.split('\n')).map(lambda line : tokenizer.tokenize(line)).map(lambda x : " ".join(x) + ".");
+        lines = lines.flatMap(lambda x : x.split('\n')).map(lambda line : word_tokenize(line)).map(lambda x : " ".join(x) + ".");
 
 
     #Serires of operations										# Get rid of len 0 line 			#get zipWithIndex
@@ -130,24 +134,23 @@ def frequentMine(Filepath, iteration = 8, minimumSupport = 6, tweets=False):
             break
         MergeFrequency = frequencyDict.reduce(lambda x,y : Utility.mergeFrequency(x,y))
 
-        #Getting the result out
-        result.update(MergeFrequency)
+        filterMergeFrequency = MergeFrequency;
+
+        #Parallize the result out
+        ls = sc.parallelize(filterMergeFrequency.items()).filter(lambda (x,y) : y >= minFrequency and len(x) > 0).collect();
+        result.update(ls);
+
+        #Another iteration
         frequecy = MergeFrequency
         phasefrequency = findDict
 
     #Last process
-    lastRun = []
-    for k,v in result.iteritems():
-        if(v < minFrequency):
-            lastRun.append(k)
-    [result.pop(key) for key in lastRun]
-
     print result
 
 
 
 def main():
-    frequentMine(Filepath ="./tweets_smaller.txt", iteration = 8, minimumSupport = 6, tweets =True)
+    frequentMine(Filepath ="./tweets_smaller.txt", iteration = 8, minimumSupport = 6, tweets =False)
 
 
 if __name__ == "__main__": main()
