@@ -4,12 +4,47 @@ from pyspark import SparkConf,SparkContext
 from nltk.tokenize import RegexpTokenizer
 from itertools import chain
 import json
+import re
 from nltk.tokenize import word_tokenize
 
 
 
 tokenizer = RegexpTokenizer(r'\w+')
 #tokenizer = RegexpTokenizer('[A-Z]\w+')
+class TweetPreProcess:
+    emoticons_str = r"""
+        (?:
+            [:=;] # Eyes
+            [oO\-]? # Nose (optional)
+            [D\)\]\(\]/\\OpP] # Mouth
+        )"""
+
+    regex_str = [
+        emoticons_str,
+        r'<[^>]+>', # HTML tags
+        r'(?:@[\w_]+)', # @-mentions
+        r"(?:\#+[\w_]+[\w\'_\-]*[\w_]+)", # hash-tags
+        r'http[s]?://(?:[a-z]|[0-9]|[$-_@.&amp;+]|[!*\(\),]|(?:%[0-9a-f][0-9a-f]))+', # URLs
+
+        r'(?:(?:\d+,?)+(?:\.?\d+)?)', # numbers
+        r"(?:[a-z][a-z'\-_]+[a-z])", # words with - and '
+        r'(?:[\w_]+)', # other words
+        r'(?:\S)' # anything else
+    ]
+
+    tokens_re = re.compile(r'('+'|'.join(regex_str)+')', re.VERBOSE | re.IGNORECASE)
+    emoticon_re = re.compile(r'^'+emoticons_str+'$', re.VERBOSE | re.IGNORECASE)
+
+    def tokenize(s):
+        return tokens_re.findall(s)
+
+    def preprocess(s, lowercase=False):
+        tokens = tokenize(s)
+        if lowercase:
+            tokens = [token if emoticon_re.search(token) else token.lower() for token in tokens]
+        return tokens
+
+
 
 class Utility:
     @staticmethod
@@ -55,10 +90,7 @@ class Utility:
             if(subindex + n - 1 >= len(input)): continue;
             # x to x+n-1
             string = " ".join([input[i] for i in range(subindex,subindex + n)]);
-            if dict.has_key(string):
-                dict[string] += 1
-            else:
-                dict[string] = 1
+            dict[string] = dict.setdefault(string,0) + 1;
 
         return dict
 
@@ -70,10 +102,7 @@ class Utility:
 
 
         for (k,v) in dict2.iteritems():
-            if(mergeDict.has_key(k)):
-                mergeDict[k] += dict2.get(k)
-            else:
-                mergeDict[k] = dict2.get(k);
+            mergeDict[k] = mergeDict.setdefault(k,0) + dict2.get(k);
 
         return mergeDict
 
@@ -84,14 +113,33 @@ class Utility:
         if (tweet.get('text') != None and tweet.get('lang') == 'en'):
             formatStr = " ".join(tokenizer.tokenize(tweet.get('text'))) + ".";
         return formatStr;
+    @staticmethod
+
+    def getPerTweet(input, index, gram,findDict):
+        original = input;
+        input = input.split(' ')
+        output = {}
+        output.setdefault(original, []);
+        for idx in findDict[index]:
+            output[original].append(" ".join([input[i] for i in range(idx,idx + gram)]))
+        return output;
+
+    @staticmethod
+    def mergeDocument(dict1, dict2):
+        mergeDict = {}
+        for (k,v) in dict1.iteritems():
+            mergeDict[k] = dict1.get(k)
 
 
+        for (k,v) in dict2.iteritems():
+            mergeDict.setdefault(k,[]).append(dict2.get(k));
 
+        return mergeDict
 
 
 
 # Driver Program
-def frequentMine(Filepath, iteration = 10, minimumSupport = 6, tweets = False, verbose = False ):
+def frequentMine(Filepath, iteration = 10, minimumSupport = 6, tweets = False, perTweet = False, verbose = False):
 
     minFrequency = minimumSupport;
     #Setting up the standalone mode
@@ -106,7 +154,7 @@ def frequentMine(Filepath, iteration = 10, minimumSupport = 6, tweets = False, v
             .map(lambda line : Utility.loadJson(line))
 
 
-    #Serires of operations										# Get rid of len 0 line 			#get zipWithIndex
+    #Serires of operations # Get rid of len 0 line 	#get zipWithIndex
     idxSentence = lines.flatMap(lambda line : line.split(".")) \
                         .filter(lambda line : len(line) > 0 ).zipWithIndex().persist()
 
@@ -114,23 +162,33 @@ def frequentMine(Filepath, iteration = 10, minimumSupport = 6, tweets = False, v
     phasefrequency = {}
     frequecy = {}
     result = {}
-
+    document = {}
     # Main Logic of Phase Mining
     # i is the i-grams, default to 8
     for i in range(1,iteration):
         #First Map reduce job get the all N-gram that satisfy minimum support
-        #And put them with corresponding index
-        #Map should take one argument (x,y)
+        #And count if i - 1 is frequent
         nGram = idxSentence \
-            .map( lambda (x,y) : Utility.ngrams(x,y,i,phasefrequency,frequecy,minFrequency))
-
+            .map( lambda (x,y): Utility.ngrams(x,y,i,phasefrequency,frequecy,minFrequency))
         if verbose:
-            print "debug"
+            print "Debugging ....."
             print nGram.collect();
 
         #Merge all possible #document -> index of ngram
         findDict = nGram \
             .reduce( lambda x,y : Utility.mergeDict(x,y))
+
+        #Extra frequent terms
+        #For i >= 2, each findDict calculate frequent i - 1 terms index
+        if perTweet and i >= 2:
+            doc = idxSentence \
+                .map(lambda (x,y) : Utility.getPerTweet(x,y,i-1,findDict))
+
+            if not doc.isEmpty():
+                doc_val = doc \
+                    .reduce( lambda x,y : Utility.mergeDict(x,y))
+            document = Utility.mergeDocument(document, doc_val)
+            #print "document value is ", doc_val;
 
         #Pruning
         idxSentence = idxSentence \
@@ -148,7 +206,7 @@ def frequentMine(Filepath, iteration = 10, minimumSupport = 6, tweets = False, v
         #Check Empty
         if frequencyDict.isEmpty():
             break
-            
+
         MergeFrequency = frequencyDict \
             .reduce(lambda x,y : Utility.mergeFrequency(x,y))
 
@@ -169,11 +227,10 @@ def frequentMine(Filepath, iteration = 10, minimumSupport = 6, tweets = False, v
 
     #Last process
     print result
-
-
+    if perTweet: print document
 
 def main():
-    frequentMine(Filepath ="./tweets_smaller.txt", iteration = 8, minimumSupport = 2, tweets =True,verbose=True)
+    frequentMine(Filepath ="./tweets_smaller.txt", iteration = 8, minimumSupport = 2, tweets =True,perTweet=True,verbose=False)
 
 
 if __name__ == "__main__": main()
