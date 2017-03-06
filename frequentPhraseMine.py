@@ -112,8 +112,10 @@ class Utility:
     def loadJson(line):
         formatStr = ""
         tweet = json.loads(line).get('tweet')
+        if(tweet == None):
+            return formatStr;
         tpp = TweetPreProcess()
-        if (tweet.get('text') != None and tweet.get('lang') == 'en'):
+        if (tweet.get('text') != None and tweet.get('lang') != None and tweet.get('lang') == 'en'):
             #formatStr = " ".join(tpp.preprocess(tweet.get('text'),True)) + ".";
             formatStr = " ".join(tokenizer.tokenize(tweet.get('text'))) + ".";
         return formatStr;
@@ -234,7 +236,7 @@ def frequentMine(Filepath, iteration = 10, minimumSupport = 6, tweets = False, p
     if perTweet: print document
 
 def main():
-    frequentMine(Filepath ="./tweets_smaller.txt", iteration = 8, minimumSupport = 2, tweets =True,perTweet=True,verbose=False)
+    frequentMine(Filepath ="./tweets_smaller.txt", iteration = 8, minimumSupport = 2, tweets =True,perTweet=False,verbose=False)
 
 
 if __name__ == "__main__": main()
